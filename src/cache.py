@@ -16,7 +16,7 @@ import redis
 
 # Redis 地址：环境变量 REDIS_HOST 覆盖（服务器上设 127.0.0.1，本地默认连 VM）
 REDIS_HOST = os.getenv("REDIS_HOST", "192.168.150.128")
-r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+r = redis.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
 
 # 缓存有效期（秒）— 60 秒太短浪费，1 小时太长容易过期信息，取 15 分钟
 CACHE_TTL = 900

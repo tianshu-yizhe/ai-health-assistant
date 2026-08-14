@@ -28,7 +28,7 @@ CRISIS_MSG = "你不是一个人。如果此刻你感到痛苦，请拨打 24 �
 
 # ── 频次限流状态（Redis 存储，重启不清零）──
 REDIS_HOST = os.getenv("REDIS_HOST", "192.168.150.128")
-_r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
+_r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
 GARBAGE_TTL = 3600   # 计数 1 小时无操作自动过期
 MAX_WARNING = 3   # 连续 3 轮 → 显示警告
 MAX_FROZEN = 5    # 连续 5 轮 → 静默，彻底不理
