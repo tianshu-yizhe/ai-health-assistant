@@ -277,6 +277,21 @@ async def chat_rag_get(
 # ═══════════════════════════════════════════════════════
 #  POST /api/chat/rag/stream  — RAG 流式输出
 #  ═══════════════════════════════════════════════════════
+def _build_rag_prompt(base_prompt: str, retrieved_docs: list) -> str:
+    """把检索到的知识库片段拼进系统提示；无检索结果时退回基础提示。
+    流式与非流式接口共用，保证两边的 Prompt 行为一致。"""
+    if not retrieved_docs:
+        return base_prompt
+    docs_text = "\n---\n".join(d["text"] for d in retrieved_docs)
+    return f"""{base_prompt}
+
+【参考资料】
+以下是从知识库中检索到的相关医学资料，请参考这些资料回答问题。
+如果资料不足以回答用户的问题，请如实说明，不要编造信息。
+
+{docs_text}"""
+
+
 @app.post("/api/chat/rag/stream")
 async def chat_rag_stream(req: ChatStreamRequest):
     question = req.question
@@ -302,17 +317,7 @@ async def chat_rag_stream(req: ChatStreamRequest):
     retrieved_docs = await search(question, top_k=3)
     base_prompt = build_system_prompt()
     model = get_model()
-
-    if retrieved_docs:
-        docs_text = "\n---\n".join(d["text"] for d in retrieved_docs)
-        system_prompt = f"""{base_prompt}
-
-【参考资料】
-以下是从知识库中检索到的相关医学资料，请参考这些资料回答问题。
-
-{docs_text}"""
-    else:
-        system_prompt = base_prompt
+    system_prompt = _build_rag_prompt(base_prompt, retrieved_docs)
 
     # 多轮对话：system 提示 + 历史对话 + 当前问题
     messages = [{"role": "system", "content": system_prompt}]
@@ -468,19 +473,7 @@ async def _do_chat_with_rag(question: str, debug: bool = False) -> dict:
     # 构建 Prompt：基础系统提示 + 检索到的参考文档 + 用户问题
     base_prompt = build_system_prompt()
     model = get_model()
-
-    if retrieved_docs:
-        docs_text = "\n---\n".join(d["text"] for d in retrieved_docs)
-        system_prompt = f"""{base_prompt}
-
-【参考资料】
-以下是从知识库中检索到的相关医学资料，请参考这些资料回答问题。
-如果资料不足以回答用户的问题，请如实说明，不要编造信息。
-
-{docs_text}"""
-    else:
-        # 知识库为空，退化为普通模式
-        system_prompt = base_prompt
+    system_prompt = _build_rag_prompt(base_prompt, retrieved_docs)
 
     messages = [
         {"role": "system", "content": system_prompt},
