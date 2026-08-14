@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台 · 一折健康助手</title>
+<style>
+    :root { --bg:#f0f4f8; --panel:#fff; --text:#1f2d3d; --sub:#7a8a99; --line:#e3eaf1; --primary:#0f766e; --danger:#dc2626; --warn:#d97706; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); min-height:100vh; color:var(--text); font-size:14px; }
+    .hidden { display:none !important; }
+    /* 登录 */
+    #login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; }
+    .login-card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:36px 32px; width:340px; box-shadow:0 8px 30px rgba(15,60,80,.08); }
+    .login-card h1 { font-size:18px; margin-bottom:4px; }
+    .login-card p { color:var(--sub); font-size:12px; margin-bottom:20px; }
+    .login-card input { width:100%; padding:10px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:14px; margin-bottom:12px; outline:none; }
+    .login-card input:focus { border-color:var(--primary); }
+    .login-card button { width:100%; padding:10px; background:var(--primary); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer; }
+    #login-msg { color:var(--danger); font-size:12px; margin-top:10px; min-height:16px; }
+    /* 面板 */
+    #dash { max-width:1080px; margin:0 auto; padding:20px; }
+    .topbar { display:flex; align-items:center; gap:10px; margin-bottom:18px; }
+    .topbar h1 { font-size:17px; flex:1; }
+    .topbar .dot { width:8px; height:8px; border-radius:50%; background:#22c55e; }
+    .topbar button { padding:8px 14px; background:var(--panel); border:1px solid var(--line); border-radius:8px; font-size:13px; cursor:pointer; color:var(--text); }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:12px; margin-bottom:18px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+    .card .label { font-size:12px; color:var(--sub); margin-bottom:6px; }
+    .card .value { font-size:22px; font-weight:600; }
+    .card .value.small { font-size:17px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+    .panel h2 { font-size:14px; margin-bottom:12px; }
+    .ev-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+    .ev-head h2 { flex:1; margin-bottom:0; }
+    .ev-head input { padding:7px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:13px; width:200px; outline:none; }
+    .ev-head input:focus { border-color:var(--primary); }
+    .ev-pager { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--sub); }
+    .ev-pager button { padding:5px 10px; background:var(--panel); border:1px solid var(--line); border-radius:6px; font-size:12px; cursor:pointer; color:var(--text); }
+    .ev-pager button:disabled { opacity:.4; cursor:not-allowed; }
+    .bars { display:flex; align-items:flex-end; gap:8px; height:120px; }
+    .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
+    .bar { width:70%; background:linear-gradient(180deg,#14b8a6,#0f766e); border-radius:4px 4px 0 0; min-height:2px; }
+    .bar-col .v { font-size:10px; color:var(--sub); }
+    .bar-col .d { font-size:10px; color:var(--sub); }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--sub); font-weight:500; }
+    td.mono { font-family:Consolas,monospace; color:#3d4a58; word-break:break-all; }
+    .tag { padding:2px 8px; border-radius:10px; font-size:11px; }
+    .tag.err { background:#fdeaea; color:var(--danger); }
+    .tag.warn { background:#fdf3e2; color:var(--warn); }
+    .tag.ok { background:#e4f4f1; color:var(--primary); }
+</style>
+</head>
+<body>
+<div id="login-wrap">
+    <div class="login-card">
+        <h1>一折健康助手</h1>
+        <p>管理后台 · 仅限管理员访问</p>
+        <input id="u" placeholder="用户名" autocomplete="username" />
+        <input id="p" type="password" placeholder="密码" autocomplete="current-password" />
+        <button onclick="doLogin()">登 录</button>
+        <div id="login-msg"></div>
+    </div>
+</div>
+<div id="dash" class="hidden">
+    <div class="topbar">
+        <span class="dot"></span>
+        <h1>管理后台 · 一折健康助手</h1>
+        <button onclick="load()">刷新</button>
+        <button onclick="doLogout()">退出登录</button>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="panel">
+        <h2>近 7 天请求量</h2>
+        <div class="bars" id="req-bars"></div>
+    </div>
+    <div class="panel">
+        <h2>近 7 天 Token 用量（绿=输入 蓝=输出）</h2>
+        <div class="bars" id="tok-bars"></div>
+    </div>
+    <div class="panel">
+        <div class="ev-head">
+            <h2>最近操作事件</h2>
+            <input id="ev-search" placeholder="搜索事件内容…" />
+            <div class="ev-pager">
+                <button id="ev-prev">上一页</button>
+                <span id="ev-page">1 / 1</span>
+                <button id="ev-next">下一页</button>
+            </div>
+        </div>
+        <table id="events"><thead><tr><th style="width:150px">时间</th><th>事件</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+<script>
+var TOKEN_KEY = 'yz_admin_token';
+var allEvents = [], evPage = 1, evQuery = '';
+var EV_PAGE_SIZE = 10;
+
+function renderEvents() {
+    var filtered = allEvents;
+    var q = evQuery.trim().toLowerCase();
+    if (q) {
+        filtered = allEvents.filter(function (e) { return e.toLowerCase().indexOf(q) >= 0; });
+    }
+    var totalPages = Math.max(1, Math.ceil(filtered.length / EV_PAGE_SIZE));
+    if (evPage > totalPages) evPage = totalPages;
+    if (evPage < 1) evPage = 1;
+    var pageItems = filtered.slice((evPage - 1) * EV_PAGE_SIZE, evPage * EV_PAGE_SIZE);
+    var tb = document.querySelector('#events tbody');
+    tb.innerHTML = '';
+    pageItems.forEach(function (e) {
+        var tr = document.createElement('tr');
+        var kind, label;
+        if (e.indexOf('ERROR') >= 0) { kind = 'err'; label = '错误'; }
+        else if (e.indexOf('拦截') >= 0 || e.indexOf('限流') >= 0) { kind = 'warn'; label = '拦截'; }
+        else { kind = 'ok'; label = '提问'; }
+        var time = (e.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/) || [''])[0];
+        var text = e.replace(time, '').replace(/^[ |]+/, '');
+        tr.innerHTML = '<td class="mono">' + time + '</td><td class="mono"><span class="tag ' + kind + '">' + label + '</span> ' + text.replace(/[<>&]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; }) + '</td>';
+        tb.appendChild(tr);
+    });
+    document.getElementById('ev-page').textContent = evPage + ' / ' + totalPages;
+    document.getElementById('ev-prev').disabled = evPage <= 1;
+    document.getElementById('ev-next').disabled = evPage >= totalPages;
+}
+function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function show(which) {
+    document.getElementById('login-wrap').classList.toggle('hidden', which !== 'login');
+    document.getElementById('dash').classList.toggle('hidden', which !== 'dash');
+}
+async function doLogin() {
+    var u = document.getElementById('u').value.trim();
+    var p = document.getElementById('p').value;
+    var msg = document.getElementById('login-msg');
+    msg.textContent = '';
+    try {
+        var res = await fetch('api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p })
+        });
+        var data = await res.json();
+        if (res.ok && data.token) {
+            localStorage.setItem(TOKEN_KEY, data.token);
+            show('dash');
+            load();
+        } else {
+            msg.textContent = data.msg || '登录失败';
+        }
+    } catch (e) { msg.textContent = '网络异常，请稍后再试'; }
+}
+async function doLogout() {
+    try { await fetch('api/admin/logout?token=' + encodeURIComponent(token()), { method: 'POST' }); } catch (e) {}
+    localStorage.removeItem(TOKEN_KEY);
+    show('login');
+}
+function card(label, value, small) {
+    return '<div class="card"><div class="label">' + label + '</div><div class="value' + (small ? ' small' : '') + '">' + value + '</div></div>';
+}
+function bars(el, data, fmt) {
+    var max = 1;
+    data.forEach(function (d) { if (d.value > max) max = d.value; });
+    el.innerHTML = '';
+    data.forEach(function (d) {
+        var col = document.createElement('div');
+        col.className = 'bar-col';
+        var h = max > 0 ? Math.round(d.value / max * 100) : 0;
+        col.innerHTML = '<div class="v">' + fmt(d.value) + '</div><div class="bar" style="height:' + Math.max(h, 2) + '%"></div><div class="d">' + d.date.slice(5) + '</div>';
+        el.appendChild(col);
+    });
+}
+async function load() {
+    if (!token()) { show('login'); return; }
+    try {
+        var res = await fetch('api/admin/snapshot?token=' + encodeURIComponent(token()));
+        if (res.status === 401) { doLogout(); return; }
+        var s = await res.json();
+        var t = s.today;
+        document.getElementById('cards').innerHTML =
+            card('今日请求', t.requests) +
+            card('安全拦截', t.blocked) +
+            card('LLM 错误', t.llm_errors) +
+            card('限流触发', t.rate_limited) +
+            card('Token 输入', t.tokens_in, true) +
+            card('Token 输出', t.tokens_out, true) +
+            card('活跃会话', t.sessions) +
+            card('受限 IP 数', t.rl_ips);
+        bars(document.getElementById('req-bars'), s.series.requests, function (v) { return v; });
+        var tok = s.series.usage.map(function (d) { return { date: d.date, value: d.in + d.out }; });
+        bars(document.getElementById('tok-bars'), tok, function (v) { return v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v; });
+        allEvents = s.recent_events || [];
+        renderEvents();
+    } catch (e) {}
+}
+document.getElementById('ev-prev').addEventListener('click', function () { evPage--; renderEvents(); });
+document.getElementById('ev-next').addEventListener('click', function () { evPage++; renderEvents(); });
+document.getElementById('ev-search').addEventListener('input', function () {
+    evQuery = this.value;
+    evPage = 1;
+    renderEvents();
+});
+if (token()) { show('dash'); load(); } else { show('login'); }
+document.getElementById('p').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+setInterval(function () {
+    if (!document.getElementById('dash').classList.contains('hidden')) load();
+}, 10000);
+</script>
+</body>
+</html>
