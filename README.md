@@ -3,6 +3,21 @@
 面向健康科普场景的 RAG 检索问答服务，支持智能导诊、医学科普、健康预防三类问答。
 已上线公网运行，本目录为完整源码（与线上版本同步），可用于本地运行学习。
 
+- 线上产品：http://8.148.92.200/ai/
+- 技术栈：Python · FastAPI · 通义千问 API · ChromaDB · Redis · Nginx · Systemd
+
+## 系统架构
+
+```
+浏览器 ──► Nginx (80) ──┬──► /ai/* ──► FastAPI (127.0.0.1:8000)
+                        │                ├── 输入 6 层安全过滤
+                        │                ├── RAG 检索（ChromaDB 向量库）
+                        │                ├── 通义千问生成（SSE 流式）
+                        │                ├── Redis：缓存 / 会话记忆 / 限流 / 指标
+                        │                └── 管理后台 /admin（token 鉴权）
+                        └──► / ──► douyin-parse (127.0.0.1:9090，独立服务)
+```
+
 ## 项目结构
 
 ```
@@ -21,16 +36,17 @@ openai/
 │   ├── config.py            # 配置加载器
 │   └── logger.py            # 日志（控制台 + 按天滚动文件，保留 7 天）
 ├── knowledge/               # 健康科普资料（txt，放入后重启自动增量索引）
-├── static/                  # 前端静态资源（favicon 等）
-├── tests/                   # 接口测试
-└── chroma_db/               # 向量库持久化目录（自动生成）
+├── static/                  # 前端资源：index.html（聊天页）、admin.html（管理后台）、favicon
+├── tests/                   # test_unit_*.py 纯单元测试（pytest）+ test_chat.py 接口回归脚本
+├── .github/workflows/       # CI：push 自动跑单元测试
+└── chroma_db/               # 向量库持久化目录（自动生成，不入库）
 ```
 
 ## 本地运行
 
 ```bash
 # 1. 安装依赖（建议用 .venv）
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
 # 2. 确保 .env 里有 DASHSCOPE_API_KEY
 
@@ -59,10 +75,21 @@ python main.py
 
 ## 关键设计（面试可讲）
 
-1. **RAG 链路**：文档 300 字切分（50 重叠）→ text-embedding-v4 向量化 → ChromaDB Top-K 检索 → 拼入 Prompt → 通义千问生成，回答标注【来源：文件名】
+1. **RAG 链路**：文档 300 字切分（50 重叠）→ text-embedding-v4 向量化 → ChromaDB Top-K 检索 → 拼入 Prompt → 通义千问生成；流式/非流式共用 `_build_rag_prompt` 保证行为一致
 2. **增量索引**：index_meta.json 记录文件修改时间，只重建新增/变更的文档
 3. **多轮对话**：历史存 Redis（JSON + 24h TTL + 10 轮裁剪），多轮模式不走问答缓存（答案依赖上下文）
 4. **安全分层**：输入 6 层拦截（心理危机/无效输入/绕过话术/求药/剂量/违禁）+ 输出剂量过滤 + 流式 15 字符尾部缓冲增量过滤
 5. **降级设计**：Redis 挂→无缓存/无记忆继续服务；检索挂→退化为普通问答；LLM 超时→固定话术，核心接口不 500
 6. **限流**：Redis 固定窗口 30 次/分钟/IP，nginx 反代下取 X-Real-IP 真实 IP
-7. **可观测性**：metrics.py 按天埋点（请求/拦截/LLM 错误/限流）→ Redis，管理后台 /admin 登录后查看仪表盘；公网不暴露内部接口（/api/stats、debug=true 均被 nginx 404）
+7. **可观测性**：metrics.py 按天埋点（请求/拦截/LLM 错误/限流）→ Redis，管理后台 /admin 登录后查看仪表盘（登录防爆破、token 鉴权）；公网不暴露内部接口（/api/stats、debug=true 均被 nginx 404）；管理请求不计入业务指标（避免观察者效应）
+8. **安全过滤性能**：5 组正则模块加载时预编译，热路径零编译开销
+
+## 测试
+
+```bash
+# 纯单元测试（无需 Redis/LLM，CI 自动执行）
+python -m pytest
+
+# 接口回归测试（需本地服务已启动）
+python tests/test_chat.py
+```
