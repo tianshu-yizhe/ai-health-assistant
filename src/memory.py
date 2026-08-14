@@ -48,18 +48,21 @@ def get_history(session_id: str) -> List[Dict[str, str]]:
     return []
 
 
+def _trim_history(history: List[Dict[str, str]], max_messages: int = None) -> List[Dict[str, str]]:
+    """裁剪历史到最多 max_messages 条（保留最新），纯函数便于单测"""
+    if max_messages is None:
+        max_messages = MAX_ROUNDS * 2
+    if len(history) > max_messages:
+        return history[-max_messages:]
+    return history
+
+
 def add_message(session_id: str, role: str, content: str):
     """往会话历史里追加一条消息（Redis 挂了静默跳过）"""
     try:
-        history = get_history(session_id)
+        # 先裁剪再追加：MAX_ROUNDS * 2 = 用户消息 + AI 回复，10 轮就是 20 条
+        history = _trim_history(get_history(session_id))
         history.append({"role": role, "content": content})
-
-        # 控制长度：超过限制自动裁剪最旧的对话
-        # MAX_ROUNDS * 2 = 用户消息 + AI 回复，10 轮就是 20 条
-        max_messages = MAX_ROUNDS * 2
-        if len(history) > max_messages:
-            history = history[-max_messages:]
-
         r.set(_key(session_id), json.dumps(history, ensure_ascii=False), ex=SESSION_TTL)
     except redis_lib.RedisError:
         pass
