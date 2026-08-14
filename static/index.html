@@ -347,22 +347,36 @@ body{
         scrollBox();
         return row;
     }
+    // 快捷问题池：每次随机抽 3 个不重复的，覆盖导诊/科普/预防三类
+    var QUESTION_POOL = [
+        '感冒了应该注意什么', '头痛挂什么科室', '经常熬夜怎么调理',
+        '高血压饮食注意什么', '布洛芬和对乙酰氨基酚的区别', '儿童腹痛常见原因',
+        '发烧应该挂什么科室', '胃痛可能是什么原因', '如何科学补觉',
+        '长期失眠怎么办', '咳嗽老不好怎么办', '减肥期间怎么吃健康'
+    ];
+    function pickQuestions(n) {
+        var pool = QUESTION_POOL.slice(), out = [];
+        while (out.length < n && pool.length) {
+            out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+        }
+        return out;
+    }
     function showWelcome() {
         var w = document.createElement('div');
         w.className = 'welcome';
         w.innerHTML = '<div class="ai-hero"><img class="hero-face" src="static/avatar.png" width="112" height="112" alt="一折"></div>' +
             '<div class="hello-en">见字如面 · 慢慢说</div><h2>你好，我是一折</h2>' +
             '<p>日常养生、饮食调理、小病小痛怎么就诊，都可以问我</p>' +
-            '<div class="cards">' +
-            '<div class="card" data-q="感冒了应该注意什么">感冒了应该注意什么</div>' +
-            '<div class="card" data-q="头痛应该挂哪个科室">头痛挂什么科室</div>' +
-            '<div class="card" data-q="经常熬夜怎么调理">经常熬夜怎么调理</div>' +
-            '</div>';
+            '<div class="cards"></div>';
         box.appendChild(w);
-        var cards = w.querySelectorAll('.card');
-        for (var i = 0; i < cards.length; i++) {
-            cards[i].addEventListener('click', function () { ask(this.getAttribute('data-q')); });
-        }
+        var cardsBox = w.querySelector('.cards');
+        pickQuestions(3).forEach(function (q) {
+            var card = document.createElement('div');
+            card.className = 'card';
+            card.textContent = q;
+            card.addEventListener('click', function () { ask(q); });
+            cardsBox.appendChild(card);
+        });
         scrollBox();
     }
 
