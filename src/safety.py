@@ -174,17 +174,25 @@ def check_safety(question: str, session_id: str = "default") -> tuple[bool, str]
 #  输出端过滤（LLM 回答后的二次检查）
 # ═══════════════════════════════════════════════════════
 # 输入端拦的是用户，输出端拦的是 LLM——有时候 LLM 不听话，主动输出了剂量。
+# 注意：只拦"明确用药语境"的剂量。
+#   "每日食盐不超过 5 克"是饮食建议，不是用药剂量，不能误杀——
+#   所以"克/g"从剂量单位里移除（食物常用），且整段必须有用药语境词才拦截。
 OUTPUT_DOSAGE_PATTERNS = [re.compile(p) for p in [
-    r"\d{1,4}\s*(毫克|mg|克|g|毫升|ml)",
+    r"\d{1,4}\s*(毫克|mg|毫升|ml)",
+    r"\d{1,2}\s*(片|粒|颗|包|袋|胶囊)",
     r"(每次|一次|每日|每天).{0,5}\d{1,2}\s*(片|粒|颗|包|袋|次)",
     r"剂量.*\d{1,4}",
 ]]
+
+MEDICINE_CONTEXT = re.compile(r"(药|服用|口服|遵医嘱|胶囊|冲剂|药片|剂量)")
 
 OUTPUT_BLOCK_MSG = "出于安全考虑，具体用法用量请查阅药品说明书或咨询专业医师，此处不予展示。"
 
 
 def filter_output(text: str) -> str:
-    """检查 LLM 输出，命中剂量信息则替换为固定安全话术"""
+    """检查 LLM 输出：命中剂量信息且存在用药语境 → 替换为固定安全话术"""
+    if not MEDICINE_CONTEXT.search(text):
+        return text  # 纯食物/生活建议（如"食盐 5 克"）不拦
     for pattern in OUTPUT_DOSAGE_PATTERNS:
         if pattern.search(text):
             return OUTPUT_BLOCK_MSG
@@ -197,6 +205,7 @@ def filter_output(text: str) -> str:
 # 流式接口逐 chunk 下发，剂量信息可能跨 chunk 断裂，
 # 所以调用方维护一个尾部缓冲（STREAM_TAIL 字符压着不发），
 # 在"缓冲 + 新 chunk"的合并文本上跑同样的剂量正则。
+# 流式缓冲窗口小、无完整语境，直接用窄口径剂量模式（已不含"克"）。
 STREAM_TAIL = 15
 
 

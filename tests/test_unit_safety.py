@@ -59,3 +59,20 @@ class TestOutputFilter:
     def test_stream_incremental(self):
         assert find_stream_block("剂量是100毫克") is not None
         assert find_stream_block("多喝水注意休息") is None
+
+
+class TestOutputFilterNoFalsePositive:
+    def test_food_salt_not_blocked(self):
+        # 饮食建议里的"5 克"不应被拦（此前误杀的 bug）
+        text = "高血压患者每日食盐建议不超过 5 克，多吃蔬菜水果。"
+        assert filter_output(text) == text
+
+    def test_medicine_dosage_blocked(self):
+        assert filter_output("建议每次服用2片") != "建议每次服用2片"
+        assert filter_output("每日口服100毫克") != "每日口服100毫克"
+
+    def test_stream_salt_gram_not_blocked(self):
+        assert find_stream_block("每日食盐不超过5克") is None
+
+    def test_stream_medicine_blocked(self):
+        assert find_stream_block("每次2片") is not None
