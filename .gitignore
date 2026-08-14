@@ -1,0 +1,27 @@
+# 环境变量（含 API Key）
+.env
+
+# Python 虚拟环境
+.venv/
+venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+
+# 日志
+logs/
+*.log
+
+# 向量库索引（由 knowledge/ 自动重建，不入库）
+chroma_db/
+
+# 旧版遗留资源（douyin 挂件时期）
+static/widget.js
+static/nailong*
+static/cat/
