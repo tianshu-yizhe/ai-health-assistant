@@ -35,6 +35,9 @@ body{
   height:100vh;height:100dvh;display:flex;overflow:hidden;font-size:14px;
 }
 ::selection{background:rgba(47,110,93,.18)}
+/* 用户气泡是深绿渐变底，默认选中高亮在深底上看不见，单独配白色高亮 */
+.msg-row.user .bubble::selection{background:rgba(255,255,255,.4);color:#fff}
+.msg-row.user .bubble{-webkit-user-select:text;user-select:text}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:rgba(120,108,84,.2);border-radius:8px;border:2px solid transparent;background-clip:content-box}
 ::-webkit-scrollbar-thumb:hover{background:rgba(47,110,93,.35);border:2px solid transparent;background-clip:content-box}
