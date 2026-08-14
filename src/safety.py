@@ -37,14 +37,14 @@ MAX_FROZEN = 5    # 连续 5 轮 → 静默，彻底不理
 # ═══════════════════════════════════════════════════════
 #  第 0 层: 心理危机（最高优先级）
 # ═══════════════════════════════════════════════════════
-CRISIS_PATTERNS = [
+CRISIS_PATTERNS = [re.compile(p) for p in [
     r"我想死",
     r"不想活[了啦]",
     r"活着.{0,3}(没意思|没意义|好累|太累)",
     r"(想要|想).{0,2}(结束|了结).{0,2}(生命|自己|一切)",
     r"(不想|没法|活不).{0,3}下去",
     r"(死了|去死).{0,2}(算了|好了|得了|吧)",
-]
+]]
 
 
 # ═══════════════════════════════════════════════════════
@@ -90,28 +90,28 @@ def is_invalid_input(text: str) -> bool:
 # ═══════════════════════════════════════════════════════
 #  第 3 层: 绕过话术
 # ═══════════════════════════════════════════════════════
-BYPASS_PATTERNS = [
+BYPASS_PATTERNS = [re.compile(p) for p in [
     r"(写小说|写故事|写剧本|文学创作|剧情需要|角色扮演|假设|假如|假装|演).*(用药|吃药|服药|用什么药|开药|买药|推荐.*药)",
     r"(仅|只|就).*(用于|为了).*(剧情|小说|故事|创作|参考).*(用药|吃药|服药|开药|买药)",
     r"(不是真的|不会真的|不实际|不会实际).*(用药|吃药|服药|用什么药)",
-]
+]]
 
 # ── 第 4 层: 直接求药 ──
-DRUG_ASK_PATTERNS = [
+DRUG_ASK_PATTERNS = [re.compile(p) for p in [
     r"(感冒|发烧|咳嗽|胃痛|头痛|牙痛).*(吃什么药|用什么药|该吃啥药|推荐.*药)",
     r"(吃什么药|用什么药|该吃啥药).*(治|治疗|缓解).*(感冒|发烧|咳嗽)",
     # 短句式问药，不带疾病名："可以用什么药吗" / "能吃什么药" / "推荐什么药"
     r"(可以|能|该|需要|推荐).{0,4}(用|吃|喝|服用).{0,4}(什么|哪些|啥).{0,2}(药)",
     r"(用什么|吃什么|喝什么|推荐).{0,3}(药|药品|药吗)",
-]
+]]
 
 # ── 第 5 层: 剂量询问 ──
-DOSAGE_PATTERNS = [
+DOSAGE_PATTERNS = [re.compile(p) for p in [
     r"(药|片|粒|颗|包|袋|次|顿).{0,5}(多少|几[片粒颗包袋次勺滴]|用量|剂量|用法|怎么吃|怎么喝|怎么用|怎么服)",
     r"(一次|每次|一天|每日|每顿).{0,3}(吃|喝|用|服用|口服).{0,3}(多少|几[片粒颗包袋勺]|多少[克毫克毫升])",
     r"(用药|服药|吃.{0,2}药).{0,5}(剂量|用量|一次|多少|几[片粒颗])",
     r"药.{0,10}(一次|每次|一天|多少|几[片粒颗]|剂量|用量)",
-]
+]]
 
 # ── 第 6 层: 通用违禁 ──
 FORBIDDEN_KEYWORDS = [
@@ -144,22 +144,22 @@ def check_safety(question: str, session_id: str = "default") -> tuple[bool, str]
 
     # ── 第 0 层: 心理危机 ──
     for pattern in CRISIS_PATTERNS:
-        if re.search(pattern, question):
+        if pattern.search(question):
             return False, CRISIS_MSG
 
     # ── 第 3 层: 绕过话术 ──
     for pattern in BYPASS_PATTERNS:
-        if re.search(pattern, question):
+        if pattern.search(question):
             return False, "您好，出于安全考虑，我无法提供用药建议。如果您身体不适，请描述症状，我帮您判断应该去哪个科室就诊。"
 
     # ── 第 4 层: 直接求药 ──
     for pattern in DRUG_ASK_PATTERNS:
-        if re.search(pattern, question):
+        if pattern.search(question):
             return False, "您好，我不提供具体用药建议。请前往医院面诊，医生会根据您的具体情况开药。"
 
     # ── 第 5 层: 剂量询问 ──
     for pattern in DOSAGE_PATTERNS:
-        if re.search(pattern, question):
+        if pattern.search(question):
             return False, "出于安全考虑，我无法提供药品的具体剂量和用法。请查看药品说明书或咨询专业医师。"
 
     # ── 第 6 层: 通用违禁 ──
@@ -174,11 +174,11 @@ def check_safety(question: str, session_id: str = "default") -> tuple[bool, str]
 #  输出端过滤（LLM 回答后的二次检查）
 # ═══════════════════════════════════════════════════════
 # 输入端拦的是用户，输出端拦的是 LLM——有时候 LLM 不听话，主动输出了剂量。
-OUTPUT_DOSAGE_PATTERNS = [
+OUTPUT_DOSAGE_PATTERNS = [re.compile(p) for p in [
     r"\d{1,4}\s*(毫克|mg|克|g|毫升|ml)",
     r"(每次|一次|每日|每天).{0,5}\d{1,2}\s*(片|粒|颗|包|袋|次)",
     r"剂量.*\d{1,4}",
-]
+]]
 
 OUTPUT_BLOCK_MSG = "出于安全考虑，具体用法用量请查阅药品说明书或咨询专业医师，此处不予展示。"
 
@@ -186,7 +186,7 @@ OUTPUT_BLOCK_MSG = "出于安全考虑，具体用法用量请查阅药品说明
 def filter_output(text: str) -> str:
     """检查 LLM 输出，命中剂量信息则替换为固定安全话术"""
     for pattern in OUTPUT_DOSAGE_PATTERNS:
-        if re.search(pattern, text):
+        if pattern.search(text):
             return OUTPUT_BLOCK_MSG
     return text
 
@@ -203,7 +203,7 @@ STREAM_TAIL = 15
 def find_stream_block(text: str) -> str | None:
     """增量检测剂量输出；命中返回拦截文案，否则返回 None。"""
     for pattern in OUTPUT_DOSAGE_PATTERNS:
-        if re.search(pattern, text):
+        if pattern.search(text):
             return OUTPUT_BLOCK_MSG
     return None
 
