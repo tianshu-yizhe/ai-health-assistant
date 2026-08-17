@@ -22,6 +22,12 @@ EMBEDDING_MODEL = "text-embedding-v4"  # 当前最便宜，有免费额度
 CHUNK_SIZE = 300   # 每段 300 字
 CHUNK_OVERLAP = 50  # 段与段之间重叠 50 字，避免截断关键信息
 
+# 检索相似度阈值（2026-08-17 实测校准）：
+# 库内问题相似度最低 0.64，库外问题最高 0.51，取 0.6 卡在中间零误伤。
+# 低于阈值的片段视为"知识库没有相关内容"，返回空列表 → 降级为普通问答，
+# 避免模型参考不相关内容硬答（如用感冒资料回答鼻炎问题）。
+SIM_THRESHOLD = 0.6
+
 # 增量索引状态文件：{文件名: 修改时间}，只有新增/修改过的文件才重新索引
 INDEX_META_PATH = os.path.join(CHROMA_DIR, "index_meta.json")
 
@@ -105,8 +111,10 @@ def build_knowledge_base():
 
 async def search(question: str, top_k: int = 3) -> list[dict]:
     """
-    在线检索：把用户问题向量化，在 Chroma 中找最相似的 top_k 个文档片段。
+    在线检索：把用户问题向量化，在 Chroma 中找最相似的 top_k 个文档片段，
+    并用相似度阈值过滤无关片段。
     返回 [{"source": 来源文件名, "text": 片段内容}, ...]，供 Prompt 引用标注。
+    知识库没有相关内容时返回空列表 → 上层降级为普通问答。
     使用异步客户端，不阻塞事件循环。
     异常降级：Chroma 或 Embedding API 挂了 → 返回空列表，走普通聊天，不 500。
     """
@@ -121,9 +129,13 @@ async def search(question: str, top_k: int = 3) -> list[dict]:
         results = collection.query(query_embeddings=[q_embedding], n_results=top_k)
         docs = results["documents"][0]
         ids = results["ids"][0]
-        return [
-            {"source": i.rsplit("_", 1)[0].removesuffix(".txt"), "text": d}
-            for d, i in zip(docs, ids)
-        ]
+        distances = results["distances"][0]
+
+        kept = []
+        for d, i, dist in zip(docs, ids, distances):
+            sim = 1.0 / (1.0 + dist)   # L2 距离 → 0~1 相似度
+            if sim >= SIM_THRESHOLD:
+                kept.append({"source": i.rsplit("_", 1)[0].removesuffix(".txt"), "text": d})
+        return kept
     except Exception:
         return []  # 检索挂了 → 当没有知识库，降级为普通问答
