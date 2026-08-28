@@ -485,7 +485,7 @@ body{
         try {
             var reqBody, reqUrl;
             if (img) {
-                reqUrl = apiBase + 'api/chat/image';
+                reqUrl = apiBase + 'api/chat/agent';
                 reqBody = JSON.stringify({ image_data: img, question: text, session_id: currentId });
             } else {
                 reqUrl = apiBase + 'api/chat/rag/stream';

@@ -227,7 +227,13 @@ STREAM_TAIL = 15
 
 
 def find_stream_block(text: str) -> str | None:
-    """增量检测剂量输出；命中返回拦截文案，否则返回 None。"""
+    """增量检测剂量输出；命中返回拦截文案，否则返回 None。
+
+    转述豁免：含 REFERENCE_MARKERS（说明书标注/识别结果等转述标记）时放行——
+    图片识别后的追问（如"一次吃几个"）回答的是说明书转述内容，不是主动建议。
+    """
+    if any(m in text for m in REFERENCE_MARKERS):
+        return None
     for pattern in OUTPUT_DOSAGE_PATTERNS:
         if pattern.search(text):
             return OUTPUT_BLOCK_MSG

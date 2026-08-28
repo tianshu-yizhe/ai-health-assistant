@@ -248,9 +248,9 @@ class ChatStreamRequest(BaseModel):
 
 
 class ChatImageRequest(BaseModel):
-    image_data: str | list[str]      # data URL 或 data URL 数组（多图，如药盒正反面）
+    image_data: str | list[str] | None = None  # data URL 或数组（多图）；文字问答可为空
     question: str = ""               # 可选：用户附带的问题
-    session_id: str = ""             # 会话ID：图片识别结果进会话记忆，可连续追问
+    session_id: str = ""             # 会话ID：识别结果进会话记忆，可连续追问
 
 
 # ═══════════════════════════════════════════════════════
@@ -579,6 +579,115 @@ async def _do_chat_with_rag_memory(question: str, session_id: str, skip_dosage: 
     add_message(session_id, "user", question)
     add_message(session_id, "assistant", answer)
     return {"answer": answer}
+
+
+# ═══════════════════════════════════════════════════════
+#  Agent 模式 — function calling 循环（LLM 自主决策调工具）
+#  ═══════════════════════════════════════════════════════
+AGENT_MODEL = os.getenv("AGENT_MODEL", "qwen-max")
+_agent_images: list[str] = []  # 本会话注入的图片 data URL（供识图工具读取）
+
+AGENT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "recognize_image",
+            "description": "识别用户上传的图片（药盒/化验单/症状照片，可能多张）。图片已由系统提供，调用即返回识别结果",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge",
+            "description": "在健康知识库中检索与问题相关的医学资料",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "要检索的问题或关键词"}},
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+
+async def _agent_run(question: str, session_id: str, images: list[str] | None = None) -> dict:
+    """Agent 循环：LLM 自主决定调工具（识图/检索），工具结果回填后给出最终回答。
+
+    最多 4 轮工具调用；支持会话记忆；图片转述场景跳过剂量拦截。
+    """
+    is_safe, reason = check_safety(question, session_id)
+    if not is_safe:
+        metrics.incr("blocked")
+        return {"answer": reason}
+
+    global _agent_images
+    _agent_images = images or []
+
+    system_prompt = build_system_prompt()
+    user_content = question
+    if _agent_images:
+        user_content = f"{question}\n（用户上传了{'%d张' % len(_agent_images)}图片，需要看图时调用 recognize_image 工具）"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(get_history(session_id))
+    messages.append({"role": "user", "content": user_content})
+
+    answer = ERROR_MSG
+    steps: list[dict] = []  # 工具调用轨迹（前端展示决策过程）
+    for _ in range(4):
+        try:
+            resp = await async_client.chat.completions.create(
+                model=AGENT_MODEL, messages=messages,
+                tools=AGENT_TOOLS, tool_choice="auto", max_tokens=600,
+            )
+        except Exception as e:
+            logger.error("Agent LLM 调用失败: %s", e)
+            metrics.incr("llm_errors")
+            answer = ERROR_MSG
+            break
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            answer = msg.content or ERROR_MSG
+            break
+        messages.append(msg)
+        for tc in msg.tool_calls:
+            name = tc.function.name
+            if name == "recognize_image":
+                if _agent_images:
+                    result = await _recognize_image(_agent_images)
+                    result = f"图片识别结果：{result}"
+                    steps.append({"tool": "识图", "detail": f"识别了 {len(_agent_images)} 张图片"})
+                else:
+                    result = "没有可识别的图片"
+            elif name == "search_knowledge":
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except Exception:
+                    args = {}
+                docs = await search(args.get("query", question), top_k=3)
+                result = json.dumps([d["text"] for d in docs], ensure_ascii=False)[:1500]
+                steps.append({"tool": "知识库检索", "detail": f"查询：{args.get('query', question)[:30]}"})
+            else:
+                result = f"未知工具: {name}"
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+    else:
+        answer = "抱歉，这个问题我思考得太久了，请换个方式再问一次。"
+
+    # agent 场景始终豁免剂量硬过滤：回答转述说明书内容受系统 prompt 约束
+    # （禁止推荐用药/替代医嘱），硬过滤放宽不会导致乱建议。
+    answer = filter_output(answer, allow_reference=True)
+    add_message(session_id, "user", question)
+    add_message(session_id, "assistant", answer)
+    return {"answer": answer, "steps": steps}
+
+
+@app.post("/api/chat/agent")
+async def chat_agent(req: ChatImageRequest):
+    """Agent 问答：LLM 自主决策（识图/检索知识库），支持图片+文字、会话记忆。"""
+    logger.info("收到Agent提问: %s", (req.question or "")[:50])
+    images = req.image_data if isinstance(req.image_data, list) else ([req.image_data] if req.image_data else None)
+    return await _agent_run(req.question.strip() or "请根据图片回答", req.session_id or "default", images)
 
 
 async def _do_chat_with_memory(question: str, session_id: str) -> dict:
