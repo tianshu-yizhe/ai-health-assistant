@@ -247,6 +247,12 @@ class ChatStreamRequest(BaseModel):
     session_id: str | None = None    # 多轮对话会话ID；为空则无记忆（兼容旧调用）
 
 
+class ChatImageRequest(BaseModel):
+    image_data: str | list[str]      # data URL 或 data URL 数组（多图，如药盒正反面）
+    question: str = ""               # 可选：用户附带的问题
+    session_id: str = ""             # 会话ID：图片识别结果进会话记忆，可连续追问
+
+
 # ═══════════════════════════════════════════════════════
 #  POST /api/chat          — 无记忆（每问独立）
 #  POST /api/chat/memory   — 带记忆（记住上下文）
@@ -449,7 +455,7 @@ async def _do_chat(question: str, session_id: str = "default") -> dict:
     return {"answer": filter_output(answer)}
 
 
-async def _do_chat_with_rag(question: str, debug: bool = False) -> dict:
+async def _do_chat_with_rag(question: str, debug: bool = False, skip_dosage: bool = False) -> dict:
     """
     RAG 增强模式：先从知识库检索相关文档，再拼进 Prompt 让 LLM 参考回答。
     高频问题走 Redis 缓存，命中直接返回不调 API。
@@ -458,7 +464,7 @@ async def _do_chat_with_rag(question: str, debug: bool = False) -> dict:
     logger.info("收到RAG提问: %s", question[:50])
     t0 = time.time()
 
-    is_safe, reason = check_safety(question)
+    is_safe, reason = check_safety(question, skip_dosage=skip_dosage)
     if not is_safe:
         logger.warning("安全拦截: %s → %s", question[:50], reason[:30])
         metrics.incr("blocked")
@@ -483,7 +489,7 @@ async def _do_chat_with_rag(question: str, debug: bool = False) -> dict:
         {"role": "user", "content": question},
     ]
     answer = await _call_llm(model, messages)
-    answer = filter_output(answer)
+    answer = filter_output(answer, allow_reference=skip_dosage)
 
     # 存入缓存，下次同样问题直接命中（错误提示不缓存）
     if answer != ERROR_MSG:
@@ -494,6 +500,84 @@ async def _do_chat_with_rag(question: str, debug: bool = False) -> dict:
 
     if debug:
         return {"answer": answer, "sources": retrieved_docs, "from_cache": False}
+    return {"answer": answer}
+
+
+# ═══════════════════════════════════════════════════════
+#  POST /api/chat/image  — 图片识别 + RAG 问答
+#  ═══════════════════════════════════════════════════════
+async def _recognize_image(image_data: str | list[str]) -> str:
+    """调用通义 VL 模型识别图片（支持多图，如药盒正反面），返回图片中的文字/内容。
+
+    用 OpenAI 兼容格式的 image_url 多模态消息；模型由 VISION_MODEL 配置。
+    """
+    model = os.getenv("VISION_MODEL", "qwen3-vl-30b-a3b-thinking")
+    images = image_data if isinstance(image_data, list) else [image_data]
+    content: list = [{"type": "image_url", "image_url": {"url": u}} for u in images]
+    content.append({"type": "text", "text": (
+        "请识别这些图片（可能是一组，如药盒正面和背面），先判断类型再按类型合并提取信息：\n"
+        "1) 药盒/药品：逐字准确输出药名、规格、剂量、主要成分、适应症、用法用量、注意事项；\n"
+        "2) 化验单/检查报告：逐字准确输出检查项目、结果值、参考范围、异常项（标出偏高/偏低）；\n"
+        "3) 症状照片：描述部位、外观特征（颜色/形态/范围）、如有文字一并输出；\n"
+        "4) 其他图片：简要描述主体内容，图中文字概括即可。\n"
+        "多张图信息合并输出，不要遗漏。只输出识别结果，不要多余解释。"
+    )})
+    messages = [{"role": "user", "content": content}]
+    try:
+        resp = await async_client.chat.completions.create(
+            model=model, messages=messages, max_tokens=800
+        )
+        return resp.choices[0].message.content or ""
+    except Exception as e:
+        logger.error("图片识别失败: %s", e)
+        return ""
+
+
+@app.post("/api/chat/image")
+async def chat_image(req: ChatImageRequest):
+    """图片识别 + RAG + 会话记忆：VL 识别图片内容（支持多图）；
+    健康相关内容拼进问题走知识库问答并写入会话记忆（可连续追问）；
+    无关内容（截图/风景等）直接返回识别描述，不做健康兜底拦截。"""
+    logger.info("收到图片提问 (data URL 长度=%d)", len(req.image_data))
+    image_text = (await _recognize_image(req.image_data) or "").strip()
+    logger.info("图片识别结果 repr: %r", image_text[:200])
+    if not image_text:
+        return {"answer": "抱歉，图片识别失败，请重试或换一张更清晰的图片。"}
+
+    health_kw = ("药", "胶囊", "片", "化验", "检查", "症状", "体温", "血压",
+                 "血糖", "医院", "医嘱", "剂量", "成分", "适应症", "服用")
+    if not any(k in image_text for k in health_kw):
+        return {"answer": f"识别结果：{image_text}"}
+
+    question = req.question.strip() or "请根据这张图片回答"
+    q = f"{question}\n【图片内容】{image_text}"
+    if req.session_id:
+        return await _do_chat_with_rag_memory(q, req.session_id, skip_dosage=True)
+    return await _do_chat_with_rag(q, skip_dosage=True)
+
+
+async def _do_chat_with_rag_memory(question: str, session_id: str, skip_dosage: bool = False) -> dict:
+    """RAG + 会话记忆：检索知识库拼进 prompt，同时带历史对话，回答写回记忆。
+
+    图片识别后的追问需要同时有知识库上下文和同一会话的历史。
+    """
+    is_safe, reason = check_safety(question, session_id, skip_dosage=skip_dosage)
+    if not is_safe:
+        metrics.incr("blocked")
+        return {"answer": reason}
+
+    retrieved_docs = await search(question, top_k=3)
+    system_prompt = _build_rag_prompt(build_system_prompt(), retrieved_docs)
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(get_history(session_id))
+    messages.append({"role": "user", "content": question})
+
+    answer = await _call_llm(get_model(), messages)
+    answer = filter_output(answer, allow_reference=skip_dosage)
+
+    add_message(session_id, "user", question)
+    add_message(session_id, "assistant", answer)
     return {"answer": answer}
 
 

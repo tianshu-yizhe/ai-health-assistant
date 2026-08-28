@@ -124,10 +124,14 @@ FORBIDDEN_KEYWORDS = [
 # ═══════════════════════════════════════════════════════
 #  统一校验入口
 # ═══════════════════════════════════════════════════════
-def check_safety(question: str, session_id: str = "default") -> tuple[bool, str]:
+def check_safety(question: str, session_id: str = "default", skip_dosage: bool = False) -> tuple[bool, str]:
     """
     返回 (是否安全, 拒绝原因或固定回复)。
     注意：这里说的"不安全"也包括无效输入（被固定文案拦截）。
+
+    ``skip_dosage=True`` 用于图片识别转述场景：识别出的药盒/说明书内容
+    含"剂量/用法"字样是正常转述，不应触发第 5 层剂量拦截（仍保留危机/
+    绕过/求药/违禁各层）。
     """
 
     # ── 第 1 层: 输入有效性（限流）──
@@ -157,10 +161,11 @@ def check_safety(question: str, session_id: str = "default") -> tuple[bool, str]
         if pattern.search(question):
             return False, "您好，我不提供具体用药建议。请前往医院面诊，医生会根据您的具体情况开药。"
 
-    # ── 第 5 层: 剂量询问 ──
-    for pattern in DOSAGE_PATTERNS:
-        if pattern.search(question):
-            return False, "出于安全考虑，我无法提供药品的具体剂量和用法。请查看药品说明书或咨询专业医师。"
+    # ── 第 5 层: 剂量询问（图片识别转述场景跳过）──
+    if not skip_dosage:
+        for pattern in DOSAGE_PATTERNS:
+            if pattern.search(question):
+                return False, "出于安全考虑，我无法提供药品的具体剂量和用法。请查看药品说明书或咨询专业医师。"
 
     # ── 第 6 层: 通用违禁 ──
     for word in FORBIDDEN_KEYWORDS:
@@ -189,10 +194,22 @@ MEDICINE_CONTEXT = re.compile(r"(药|服用|口服|遵医嘱|胶囊|冲剂|药�
 OUTPUT_BLOCK_MSG = "出于安全考虑，具体用法用量请查阅药品说明书或咨询专业医师，此处不予展示。"
 
 
-def filter_output(text: str) -> str:
-    """检查 LLM 输出：命中剂量信息且存在用药语境 → 替换为固定安全话术"""
+# 转述豁免：如实转述说明书/识别结果（非主动建议）不拦截。
+# 图片识别后的回答通常带"说明书标注/识别结果/图片内容"等转述标记。
+REFERENCE_MARKERS = ("说明书标注", "说明书显示", "据说明书", "识别结果", "图片内容", "说明书上写")
+
+
+def filter_output(text: str, allow_reference: bool = False) -> str:
+    """检查 LLM 输出：命中剂量信息且存在用药语境 → 替换为固定安全话术。
+
+    ``allow_reference=True`` 用于图片识别转述场景（回答来源是图片/说明书原文，
+    如"说明书标注：一次0.25g"），跳过剂量替换——转述不构成用药建议。
+    转述豁免（REFERENCE_MARKERS）作为补充：LLM 自带转述标记时同样放行。
+    """
     if not MEDICINE_CONTEXT.search(text):
         return text  # 纯食物/生活建议（如"食盐 5 克"）不拦
+    if allow_reference or any(m in text for m in REFERENCE_MARKERS):
+        return text  # 图片转述/说明书转述，放行
     for pattern in OUTPUT_DOSAGE_PATTERNS:
         if pattern.search(text):
             return OUTPUT_BLOCK_MSG

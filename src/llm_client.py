@@ -24,8 +24,8 @@ BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 if not API_KEY:
     raise RuntimeError("未设置 DASHSCOPE_API_KEY 环境变量，请检查 .env 文件")
 
-# 超时配置（秒）：LLM 响应不能无限等待
-TIMEOUT = 60
+# 超时配置（秒）：LLM 响应不能无限等待（VL 大图识别耗时，120s）
+TIMEOUT = 120
 
 # 同步客户端（启动建库用）
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=TIMEOUT)
