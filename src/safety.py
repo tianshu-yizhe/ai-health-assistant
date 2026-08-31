@@ -28,7 +28,9 @@ CRISIS_MSG = "感受到你现在很难受，千万不要独自硬扛。如果此
 
 # ── 频次限流状态（Redis 存储，重启不清零）──
 REDIS_HOST = os.getenv("REDIS_HOST", "192.168.150.128")
-_r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
+_r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True,
+                      socket_connect_timeout=2, socket_timeout=2,
+                      retry=None)  # Redis 挂时 2s 快速降级（8.x 默认重试会把 2s 放大到 25s），不卡请求
 GARBAGE_TTL = 3600   # 计数 1 小时无操作自动过期
 MAX_WARNING = 3   # 连续 3 轮 → 显示警告
 MAX_FROZEN = 5    # 连续 5 轮 → 静默，彻底不理

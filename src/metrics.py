@@ -16,7 +16,9 @@ import datetime
 import redis as redis_lib
 
 REDIS_HOST = os.getenv("REDIS_HOST", "192.168.150.128")
-r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
+r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True,
+                    socket_connect_timeout=2, socket_timeout=2,
+                    retry=None)  # Redis 挂时 2s 快速降级（8.x 默认重试会把 2s 放大到 25s），不卡请求
 
 TTL = 15 * 86400  # 指标保留 15 天
 

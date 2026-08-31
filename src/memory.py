@@ -22,7 +22,9 @@ from typing import List, Dict
 import redis as redis_lib
 
 REDIS_HOST = os.getenv("REDIS_HOST", "192.168.150.128")
-r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
+r = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True,
+                    socket_connect_timeout=2, socket_timeout=2,
+                    retry=None)  # Redis 挂时 2s 快速降级（8.x 默认重试会把 2s 放大到 25s），不卡请求
 
 # 每个会话最多保留多少轮对话（一轮 = 用户问 + AI 答 = 2 条消息）
 MAX_ROUNDS = 10

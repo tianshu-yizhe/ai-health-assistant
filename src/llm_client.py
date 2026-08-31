@@ -35,7 +35,9 @@ async_client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=TIMEOUT)
 
 # 用量统计 Redis（与缓存/记忆同库：db 1）
 REDIS_HOST = os.getenv("REDIS_HOST", "192.168.150.128")
-_redis = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
+_redis = redis_lib.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True,
+                         socket_connect_timeout=2, socket_timeout=2,
+                         retry=None)  # Redis 挂时 2s 快速降级（8.x 默认重试会把 2s 放大到 25s），不卡请求
 
 
 def record_usage(prompt_tokens: int, completion_tokens: int):
