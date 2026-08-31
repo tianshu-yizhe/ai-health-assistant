@@ -113,6 +113,17 @@ DOSAGE_PATTERNS = [re.compile(p) for p in [
     r"药.{0,10}(一次|每次|一天|多少|几[片粒颗]|剂量|用量)",
 ]]
 
+# ── 饮水/饮食语境豁免（第 5 层 + 输出端过滤共用）──
+# "每天喝多少水""喝水 1500 毫升"是健康高频科普，不是用药剂量，不能误拦。
+# 但"喝 10 毫升药水"（有药物词）仍须照拦。
+WATER_DRINK_RE = re.compile(r"(喝水|饮水|多喝水|饮水量|水杯|喝.{0,10}水|饮.{0,10}水)")
+MED_STRONG_RE = re.compile(r"(药|服用|口服|胶囊|剂量|遵医嘱|药片|冲剂)")
+
+
+def _is_water_drink(text: str) -> bool:
+    """饮水语境（喝水且无药物词）→ 视为健康科普，不算用药剂量"""
+    return bool(WATER_DRINK_RE.search(text)) and not MED_STRONG_RE.search(text)
+
 # ── 第 6 层: 通用违禁 ──
 FORBIDDEN_KEYWORDS = [
     "制造炸弹", "制作武器",
@@ -161,8 +172,8 @@ def check_safety(question: str, session_id: str = "default", skip_dosage: bool =
         if pattern.search(question):
             return False, "您好，我不提供具体用药建议。请前往医院面诊，医生会根据您的具体情况开药。"
 
-    # ── 第 5 层: 剂量询问（图片识别转述场景跳过）──
-    if not skip_dosage:
+    # ── 第 5 层: 剂量询问（图片识别转述场景跳过；饮水语境豁免）──
+    if not skip_dosage and not _is_water_drink(question):
         for pattern in DOSAGE_PATTERNS:
             if pattern.search(question):
                 return False, "出于安全考虑，我无法提供药品的具体剂量和用法。请查看药品说明书或咨询专业医师。"
@@ -210,6 +221,8 @@ def filter_output(text: str, allow_reference: bool = False) -> str:
         return text  # 纯食物/生活建议（如"食盐 5 克"）不拦
     if allow_reference or any(m in text for m in REFERENCE_MARKERS):
         return text  # 图片转述/说明书转述，放行
+    if _is_water_drink(text):
+        return text  # 饮水科普（如"每天喝水 1500 毫升"）不是用药剂量
     for pattern in OUTPUT_DOSAGE_PATTERNS:
         if pattern.search(text):
             return OUTPUT_BLOCK_MSG
@@ -226,13 +239,24 @@ def filter_output(text: str, allow_reference: bool = False) -> str:
 STREAM_TAIL = 15
 
 
+# 流式窗口小、无完整语境，用窄口径语境词兜底：
+# 药物词 + 剂量单位词（"每次2片"无"药"字，靠"片"兜住）。
+STREAM_MED_CONTEXT = re.compile(r"(药|服用|口服|遵医嘱|胶囊|冲剂|药片|剂量|片|粒|颗|袋)")
+
+
 def find_stream_block(text: str) -> str | None:
     """增量检测剂量输出；命中返回拦截文案，否则返回 None。
 
     转述豁免：含 REFERENCE_MARKERS（说明书标注/识别结果等转述标记）时放行——
     图片识别后的追问（如"一次吃几个"）回答的是说明书转述内容，不是主动建议。
+    饮水豁免：喝水/饮水语境（无药物词）不拦，如"每天喝水 1500 毫升"。
+    语境兜底：既非饮水、也无药物语境（如"食盐 5 克"）同样放行。
     """
     if any(m in text for m in REFERENCE_MARKERS):
+        return None
+    if _is_water_drink(text):
+        return None
+    if not STREAM_MED_CONTEXT.search(text):
         return None
     for pattern in OUTPUT_DOSAGE_PATTERNS:
         if pattern.search(text):

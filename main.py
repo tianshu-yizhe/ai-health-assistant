@@ -358,6 +358,10 @@ async def chat_rag_stream(req: ChatStreamRequest):
                     block_msg = find_stream_block(pending)
                     if block_msg:
                         logger.warning("流式输出拦截: %s", question[:50])
+                        # 先补句号自然收尾，再接拦截文案，避免"成年出于安全考虑"式粘连病句
+                        # 不吐缓冲内容：缓冲里可能含剂量文本，不能泄漏
+                        if pending and not pending.rstrip().endswith(("。", "！", "？", ".", "!", "?")):
+                            yield "。"
                         yield block_msg
                         blocked = True
                         return

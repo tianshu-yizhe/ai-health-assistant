@@ -1,13 +1,33 @@
 """安全过滤纯函数单元测试（不依赖 Redis / LLM / 服务器）"""
+import pytest
+from src import safety as safety_mod
 from src.safety import (
     is_invalid_input,
+    check_safety,
     find_stream_block,
     filter_output,
+    _is_water_drink,
     CRISIS_PATTERNS,
     BYPASS_PATTERNS,
     DRUG_ASK_PATTERNS,
     DOSAGE_PATTERNS,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fake_redis(monkeypatch):
+    """本机无 Redis：替换为假对象，避免 check_safety 用例卡在连接超时"""
+    class _FakeRedis:
+        def incr(self, key):
+            return 0
+
+        def expire(self, key, ttl):
+            pass
+
+        def delete(self, key):
+            pass
+
+    monkeypatch.setattr(safety_mod, "_r", _FakeRedis())
 
 
 class TestInvalidInput:
@@ -76,3 +96,37 @@ class TestOutputFilterNoFalsePositive:
 
     def test_stream_medicine_blocked(self):
         assert find_stream_block("每次2片") is not None
+
+
+class TestWaterDrinkExempt:
+    """「喝水」高频问题不得被剂量规则误判（2026-08-31 线上 bug）"""
+
+    def test_water_question_hits_dosage_pattern_but_exempted(self):
+        # 输入端模式确实会命中"一天喝多少水"（一天+喝+多少），豁免在 check_safety 层生效
+        assert any(p.search("一天喝多少水") for p in DOSAGE_PATTERNS)
+        assert _is_water_drink("每天喝多少水") is True
+        assert _is_water_drink("一天喝几杯水") is True
+
+    def test_check_safety_water_question_passes(self):
+        assert check_safety("每天喝多少水")[0] is True
+        assert check_safety("喝几杯水合适")[0] is True
+
+    def test_check_safety_medicine_dosage_still_blocked(self):
+        assert check_safety("这个药一次吃几片")[0] is False
+        assert _is_water_drink("这个药一次吃几片") is False
+        assert _is_water_drink("喝10毫升药水") is False
+
+    def test_water_stream_not_blocked(self):
+        assert find_stream_block("每天喝水1500-2000毫升") is None
+        assert find_stream_block("每次喝水200毫升") is None
+
+    def test_water_output_not_blocked(self):
+        text = "每天喝水1500毫升，保持水分充足。"
+        assert filter_output(text) == text
+
+    def test_medicine_stream_still_blocked(self):
+        assert find_stream_block("每次服用2片") is not None
+        assert find_stream_block("每次喝10毫升药水") is not None
+
+    def test_medicine_output_still_blocked(self):
+        assert filter_output("感冒时每次服用2片") != "感冒时每次服用2片"
