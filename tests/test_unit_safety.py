@@ -7,6 +7,7 @@ from src.safety import (
     find_stream_block,
     filter_output,
     _is_water_drink,
+    UNRELATED_PATTERNS,
     CRISIS_PATTERNS,
     BYPASS_PATTERNS,
     DRUG_ASK_PATTERNS,
@@ -130,3 +131,22 @@ class TestWaterDrinkExempt:
 
     def test_medicine_output_still_blocked(self):
         assert filter_output("感冒时每次服用2片") != "感冒时每次服用2片"
+
+
+class TestUnrelatedQuestions:
+    """无关问题（时间/天气/股票等）固定话术拦截，不调 LLM（2026-09-02 新增）"""
+
+    def test_should_block(self):
+        blocked = ["现在几点", "今天天气怎么样", "明天星期几", "帮我算一下账",
+                   "今天会下雨吗", "最近股市怎么样", "股票推荐一下"]
+        for q in blocked:
+            assert any(p.search(q) for p in UNRELATED_PATTERNS), f"应拦截: {q}"
+            assert check_safety(q)[0] is False, f"check_safety 应拦截: {q}"
+
+    def test_should_not_block(self):
+        # 健康问法不能误伤（高频场景）
+        healthy = ["下雨天膝盖疼怎么办", "发烧多少度算高烧", "几点吃药比较好",
+                   "天气干燥流鼻血", "最近总失眠怎么调理", "今天感冒了怎么办"]
+        for q in healthy:
+            assert not any(p.search(q) for p in UNRELATED_PATTERNS), f"不应拦截: {q}"
+            assert check_safety(q)[0] is True, f"check_safety 应放行: {q}"

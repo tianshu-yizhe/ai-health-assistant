@@ -133,6 +133,20 @@ FORBIDDEN_KEYWORDS = [
     "赌博", "洗钱",
 ]
 
+# ── 第 6.5 层: 无关问题（时间/天气/股票/八卦等，非健康内容）──
+# 命中直接返回固定话术不调 LLM（100% 固定、零 token 消耗）。
+# 关键词刻意保守：避免误伤健康问法（"下雨天膝盖疼""发烧几度""几点吃药""天气干燥流鼻血"）。
+UNRELATED_MSG = "这个问题超出我的能力范围啦～我只会聊健康相关的话题（症状、饮食、就诊建议这些）。身体上有什么想问的吗？"
+UNRELATED_PATTERNS = [re.compile(p) for p in [
+    r"(现在|此刻|当前)(是)?几点(了|钟)?",
+    r"(今天|现在|明天)几号",
+    r"(星期几|礼拜几|周几)",
+    r"(今天|明天|这周|周末|接下来|最近).{0,4}(天气|下雨|下雪|多云|阴天|晴天|台风|气温)",
+    r"(股票|基金|彩票|房价|股市|涨停|跌停)",
+    r"(算账|结账|数学题|等于几|算一下)",
+    r"(娱乐|八卦|明星|绯闻|热搜)",
+]]
+
 
 # ═══════════════════════════════════════════════════════
 #  统一校验入口
@@ -184,6 +198,11 @@ def check_safety(question: str, session_id: str = "default", skip_dosage: bool =
     for word in FORBIDDEN_KEYWORDS:
         if word in question:
             return False, "抱歉，您的问题涉及安全风险，无法回答。"
+
+    # ── 第 6.5 层: 无关问题（时间/天气/股票等，不调 LLM 直接固定话术）──
+    for pattern in UNRELATED_PATTERNS:
+        if pattern.search(question):
+            return False, UNRELATED_MSG
 
     return True, ""
 
