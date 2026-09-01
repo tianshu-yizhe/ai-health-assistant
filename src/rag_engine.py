@@ -10,6 +10,7 @@ RAG 检索引擎
 
 import json
 import os
+import re
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import chromadb
 from chromadb.config import Settings
@@ -37,6 +38,14 @@ chroma_client = chromadb.PersistentClient(
     settings=Settings(anonymized_telemetry=False),
 )
 collection = chroma_client.get_or_create_collection(name="medical_knowledge")
+
+
+def _clean_knowledge_text(text: str) -> str:
+    """清洗 Markdown 残留：行首 `* ` 列表项、行尾 `*` 脚注星号。
+    源文件/存量索引都可能带（LLM 会把这些星号复制进回答），入库和检索返回两处都用。"""
+    text = re.sub(r"^\s*\*\s*", "", text, flags=re.M)
+    text = re.sub(r"\*\s*$", "", text, flags=re.M)
+    return text
 
 
 def _get_embedding(text: str) -> list[float]:
@@ -92,7 +101,7 @@ def build_knowledge_base():
 
         with open(os.path.join(KNOWLEDGE_DIR, filename), "r", encoding="utf-8") as f:
             content = f.read()
-        chunks = splitter.split_text(content)
+        chunks = splitter.split_text(_clean_knowledge_text(content))
         if not chunks:
             continue
         embeddings = [_get_embedding(chunk) for chunk in chunks]
@@ -135,7 +144,7 @@ async def search(question: str, top_k: int = 3) -> list[dict]:
         for d, i, dist in zip(docs, ids, distances):
             sim = 1.0 / (1.0 + dist)   # L2 距离 → 0~1 相似度
             if sim >= SIM_THRESHOLD:
-                kept.append({"source": i.rsplit("_", 1)[0].removesuffix(".txt"), "text": d})
+                kept.append({"source": i.rsplit("_", 1)[0].removesuffix(".txt"), "text": _clean_knowledge_text(d)})
         return kept
     except Exception:
         return []  # 检索挂了 → 当没有知识库，降级为普通问答
