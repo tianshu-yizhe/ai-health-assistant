@@ -433,8 +433,8 @@ body{
         document.getElementById('q').focus();
     }
 
-    function appendMsg(role, text) {
-        var s = getSession(currentId);
+    function appendMsg(role, text, sessId) {
+        var s = getSession(sessId || currentId);
         if (!s) { s = { id: currentId, title: '', time: Date.now(), msgs: [] }; }
         s.msgs.push({ role: role, text: text, time: Date.now() });
         s.time = Date.now();
@@ -469,7 +469,7 @@ body{
         document.getElementById('q').placeholder = '描述你的症状或健康疑问…';
         var userLabel = img ? (text ? '📷 ' + text : '📷 上传图片，请识别') : text;
         addMsgRow('user', userLabel, Date.now());
-        appendMsg('user', userLabel);
+        appendMsg('user', userLabel, currentId);
         renderSidebar();
         var send = document.getElementById('send');
         var stop = document.getElementById('stop');
@@ -481,7 +481,9 @@ body{
         box.appendChild(typing);
         scrollBox();
         var first = true, bubbleEl = null, fullText = '';
+        if (abortCtrl) abortCtrl.abort();   // 中止上一个未完成请求，防止并发流互相覆盖（少字/错乱）
         abortCtrl = new AbortController();
+        var sessId = currentId;             // 锁定发送时的会话：回答必须存回原会话，切换会话不串线
         try {
             var reqBody, reqUrl;
             if (img) {
@@ -507,7 +509,7 @@ body{
                 typing.remove();
                 var row = addMsgRow('assistant', data.answer || '识别失败', Date.now());
                 row.querySelector('.bubble').textContent = data.answer || '识别失败';
-                appendMsg('assistant', data.answer || '识别失败');
+                appendMsg('assistant', data.answer || '识别失败', sessId);
                 scrollBox();
                 renderSidebar();
             } else {
@@ -515,7 +517,11 @@ body{
             var decoder = new TextDecoder();
             while (true) {
                 var chunk = await reader.read();
-                if (chunk.done) break;
+                if (chunk.done) {
+                    var tail = decoder.decode();   // flush 残留的 UTF-8 字节，防结尾少字
+                    if (tail) fullText += tail;
+                    break;
+                }
                 var piece = decoder.decode(chunk.value, { stream: true });
                 if (first) {
                     first = false;
@@ -531,11 +537,16 @@ body{
             }
         } catch (e) {
             typing.remove();
+            if (e && e.name !== 'AbortError') {
+                var errMsg = '网络连接中断，回答可能不完整，请重试。';
+                addMsgRow('assistant', errMsg, Date.now());
+                appendMsg('assistant', errMsg, sessId);
+            }
         }
         send.disabled = false;
         stop.classList.add('hidden');
         abortCtrl = null;
-        if (fullText) appendMsg('assistant', fullText);
+        if (fullText) appendMsg('assistant', fullText, sessId);
         renderSidebar();
     }
 
